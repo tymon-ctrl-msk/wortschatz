@@ -185,6 +185,9 @@ h1,h2,h3{margin:0;text-wrap:balance}
 .opt.is-ok{border:2px solid var(--ok);background:color-mix(in srgb,var(--ok) 10%,var(--surface))}
 .opt.is-bad{border:2px solid var(--bad);background:color-mix(in srgb,var(--bad) 10%,var(--surface))}
 .opt.is-dim{opacity:.55}
+.opt.is-sel{border:2px solid var(--fg);background:var(--surface-2)}
+.qlab{font-size:.75rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:-8px}
+.btn[disabled]{opacity:.45;cursor:default;filter:none}
 .fb{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-radius:12px;background:var(--surface-2)}
 .fb .v{font-weight:700}
 .fb .v.ok{color:var(--ok)} .fb .v.bad{color:var(--bad)}
@@ -274,6 +277,7 @@ const INTERVALS=[0,1,3,7,14,30,60];
 const STANDALONE=/*__STANDALONE__*/false;
 const MASTER=4, MAXBOX=6, REVIEW_MAX=50, TEST_N=25, PASS=80, PART=20;
 const BUILD='__BUILD__';
+const PART_PASS=90;
 const SPK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg>';
 const REDUCE=(function(){try{return matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){return false;}})();
 
@@ -323,9 +327,10 @@ function sayWord(w){say(plainHw(w).replace(/!$/,''));}
 
 /* ---------- progress state ---------- */
 const LS='wortschatz-a2-v1';
-function fresh(){return {v:1,c:{},l:{},t:{},pp:{},log:{},say:true,dir:'de',savedAt:0};}
+function fresh(){return {v:1,c:{},l:{},t:{},fd:{},pt:{},log:{},say:true,dir:'de',savedAt:0};}
 function valid(s){return !!(s&&typeof s==='object'&&s.c&&typeof s.c==='object');}
-function normalize(s){const f=fresh();const o=Object.assign(f,s);['log','l','t','pp'].forEach(k=>{if(!o[k]||typeof o[k]!=='object')o[k]={};});if(o.dir!=='pl')o.dir='de';
+function normalize(s){const f=fresh();const o=Object.assign(f,s);['log','l','t','fd','pt'].forEach(k=>{if(!o[k]||typeof o[k]!=='object')o[k]={};});
+  if(o.pp&&typeof o.pp==='object'){Object.keys(o.pp).forEach(k=>{o.fd[k]=1;});}delete o.pp;if(o.dir!=='pl')o.dir='de';
   const t2={};Object.keys(o.t).forEach(k=>{t2[/^\d+$/.test(k)?'T'+(+k+1):k]=o.t[k];});o.t=t2;return o;}
 function loadLocal(){try{const r=localStorage.getItem(LS);if(!r)return null;const s=JSON.parse(r);return valid(s)?normalize(s):null;}catch(e){return null;}}
 function saveLocal(){try{localStorage.setItem(LS,JSON.stringify(state));}catch(e){}}
@@ -374,7 +379,7 @@ async function connect(){
 let pendingImport=null;
 function b64e(str){const by=new TextEncoder().encode(str);let bin='';for(let i=0;i<by.length;i++)bin+=String.fromCharCode(by[i]);return btoa(bin);}
 function b64d(b){const bin=atob(b);const by=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)by[i]=bin.charCodeAt(i);return new TextDecoder().decode(by);}
-function exportCode(){return 'WSA2:'+b64e(JSON.stringify({v:1,c:state.c,l:state.l,t:state.t,pp:state.pp,log:state.log,say:state.say,dir:state.dir}));}
+function exportCode(){return 'WSA2:'+b64e(JSON.stringify({v:1,c:state.c,l:state.l,t:state.t,fd:state.fd,pt:state.pt,log:state.log,say:state.say,dir:state.dir}));}
 function importCode(txt){try{const m=String(txt||'').replace(/\s+/g,'').match(/^WSA2:(.+)$/);if(!m)return null;const s=JSON.parse(b64d(m[1]));return valid(s)?normalize(s):null;}catch(e){return null;}}
 
 function setCard(k,box,due){state.c[k]=[box,due];}
@@ -388,9 +393,11 @@ function dueKeys(){const t=today();return WORDS.filter(w=>{const c=state.c[w.key
 function lessonStats(L){let n=0,l=0,m=0;L.items.forEach(w=>{const s=status(w.key);if(s==='new')n++;else if(s==='master')m++;else l++;});return {n:n,l:l,m:m,total:L.items.length};}
 function pkey(li,p){return LESSONS[li].id+':'+p;}
 function partDone(li,p){return LESSONS[li].parts[p].every(w=>state.c[w.key]);}
-function partPassed(li,p){return !!state.pp[pkey(li,p)];}
+function flashDone(li,p){return !!state.fd[pkey(li,p)];}
+function markFlashDone(li,p){if(!flashDone(li,p)){state.fd[pkey(li,p)]=1;touch();}}
+function partScore(li,p){const v=state.pt[pkey(li,p)];return typeof v==='number'?v:null;}
+function partPassed(li,p){return (partScore(li,p)||0)>=PART_PASS;}
 function partOpen(li,p){return p===0||partPassed(li,p-1);}
-function markPassed(li,p){if(!partPassed(li,p)){state.pp[pkey(li,p)]=1;touch();}}
 function curPart(li){return LESSONS[li].parts.findIndex((a,p)=>!partPassed(li,p));}
 function nextLessonIdx(){for(let i=0;i<LESSONS.length;i++){if(curPart(i)>=0)return i;}return -1;}
 function lessonDone(li){return curPart(li)<0;}
@@ -403,7 +410,7 @@ const app=document.getElementById('app');
 let view={name:'home'};
 let session=null;
 
-function go(v){view=v;if(['learn','flash','quiz','test'].indexOf(v.name)<0)session=null;render();window.scrollTo(0,0);}
+function go(v){view=v;if(['learn','flash','quiz','test','ptest'].indexOf(v.name)<0)session=null;render();window.scrollTo(0,0);}
 
 function render(){
   let h='';
@@ -414,6 +421,7 @@ function render(){
     case 'flash':h=renderFlash();break;
     case 'quiz':h=renderQuiz();break;
     case 'test':h=renderTest();break;
+    case 'ptest':h=renderPartTest();break;
     case 'text':h=renderText();break;
     default:h=renderHome();
   }
@@ -433,12 +441,15 @@ function renderHome(){
   let h='<header class="sign"><div class="sign-in"><div class="sign-title">Wortschatz</div><div class="sign-sub">Niveau A2 · '+LESSONS.length+' Lektionen · '+WORDS.length+' Wörter</div></div></header>';
   if(STANDALONE&&!isInstalled())h+='<div class="install"><b>Zainstaluj jako aplikację</b><span>iPhone (Safari): Udostępnij → „Do ekranu początkowego”. Android (Chrome): ⋮ → „Zainstaluj aplikację”.</span></div>';
   if(nli>=0){
-    const L=LESSONS[nli],p=curPart(nli),P=L.parts[p],known=partDone(nli,p);
+    const L=LESSONS[nli],p=curPart(nli),P=L.parts[p],known=partDone(nli,p),fdn=flashDone(nli,p),psc=partScore(nli,p);
+    const nextName=p+1<L.parts.length?'Teil '+(p+2):'sprawdzian lekcji';
+    const desc=!known?'Najpierw poznajesz słowa, potem fiszki i test.':!fdn?'Słowa już poznane. Teraz fiszki: wszystkie na „Umiem”, potem test.':'Fiszki zaliczone. Test od '+PART_PASS+'% odblokuje '+nextName+'.'+(psc!=null?' Ostatnio: '+psc+'%.':'');
+    const lbl=!known?'Ucz się':!fdn?'Zalicz fiszki':'Test';
     h+='<section class="panel" aria-label="Kontynuuj naukę"><div class="eyebrow">Kontynuuj · '+(L.grund?'Grundwortschatz':'Lektion '+L.num)+'</div>'
       +'<div class="cont-t"><span class="lnum-s">'+esc(L.num)+'</span><div><div class="cont-de" lang="de">'+esc(L.de)+'</div><div class="muted small">'+esc(L.pl)+'</div></div></div>'
       +'<div class="partbar" aria-hidden="true">'+L.parts.map((a,i)=>'<span class="pb'+(partPassed(nli,i)?' done':(i===p?' cur':''))+'"></span>').join('')+'</div>'
-      +'<div class="muted small">Teil '+(p+1)+' z '+L.parts.length+' · '+slow(P.length)+'. '+(known?'Słowa już poznane. Zalicz fiszki (wszystkie na „Umiem”), żeby odblokować '+(p+1<L.parts.length?'Teil '+(p+2):'sprawdzian')+'.':'Najpierw poznajesz słowa, potem zaliczasz fiszki.')+'</div>'
-      +'<button class="btn btn-primary wide" data-a="part" data-arg="'+nli+':'+p+'">'+(known?'Zalicz fiszki':'Ucz się')+' · Teil '+(p+1)+'</button></section>';
+      +'<div class="muted small">Teil '+(p+1)+' z '+L.parts.length+' · '+slow(P.length)+'. '+desc+'</div>'
+      +'<button class="btn btn-primary wide" data-a="part" data-arg="'+nli+':'+p+'">'+lbl+' · Teil '+(p+1)+'</button></section>';
   }else{
     h+='<section class="panel"><div class="eyebrow">Kontynuuj</div><div class="st-t">Wszystkie lekcje przerobione. Zostały powtórki i sprawdziany.</div></section>';
   }
@@ -449,7 +460,7 @@ function renderHome(){
     const sc=testScore(pt);
     h+='<div class="li"><div class="sb"><div class="st-t">Sprawdzian · '+esc(LESSONS[pt].label)+'</div><div class="muted small">'+esc(LESSONS[pt].de)+' · '+TEST_N+' pytań, zaliczenie od '+PASS+'%'+(sc!=null?' · ostatnio '+sc+'%':'')+'</div></div><button class="btn" data-a="test" data-arg="'+pt+'">Zrób</button></div>';
   }else if(nli>=0){
-    h+='<div class="li is-off"><div class="sb"><div class="st-t">Sprawdzian · '+esc(LESSONS[nli].label)+'</div><div class="muted small">Odblokuje się po zaliczeniu fiszek ze wszystkich części</div></div></div>';
+    h+='<div class="li is-off"><div class="sb"><div class="st-t">Sprawdzian · '+esc(LESSONS[nli].label)+'</div><div class="muted small">Odblokuje się po zaliczeniu testów ze wszystkich części</div></div></div>';
   }
   h+='<dl class="stats"><div><dt>Seria</dt><dd>'+st+' '+plural(st,'dzień','dni','dni')+'</dd></div><div><dt>Dziś</dt><dd>'+td+' odp.</dd></div><div><dt>W nauce</dt><dd>'+known+'</dd></div><div><dt>Opanowane</dt><dd>'+mastered+'</dd></div></dl></section>';
   let sec='';
@@ -467,7 +478,7 @@ function renderHome(){
 function renderFooter(){
   let h='<footer class="foot">';
   h+='<div class="legend"><span>'+artHtml('der')+' rodzaj męski</span><span>'+artHtml('die')+' żeński</span><span>'+artHtml('das')+' nijaki</span><span>'+artHtml('die','pl')+' tylko l. mn.</span></div>';
-  h+='<details class="how"><summary>Jak się tym uczyć</summary><p>Każda lekcja dzieli się na części po około '+PART+' słów. W każdej części są różne części mowy. Najpierw poznajesz słowa: rodzajnik, formy i przykład. Potem zaliczasz fiszki: kolejna część odblokowuje się, kiedy wszystkie fiszki są na „Umiem”. Stuknij kartę, żeby ją odwrócić, przesuń w prawo, jeśli umiesz, w lewo, jeśli jeszcze nie. Fiszki, których nie umiesz, wracają w kolejnej rundzie. Po wszystkich częściach odblokowuje się sprawdzian ('+TEST_N+' pytań, zaliczenie od '+PASS+'%). Powtórka pokazuje słowa, które według cyklu 1, 3, 7, 14, 30 i 60 dni warto sobie przypomnieć. Tempo ustalasz sam.</p></details>';
+  h+='<details class="how"><summary>Jak się tym uczyć</summary><p>Każda lekcja dzieli się na części po około '+PART+' słów. W każdej części są różne części mowy. Najpierw poznajesz słowa: rodzajnik, formy i przykład. Potem fiszki (do zaliczenia, kiedy wszystkie są na „Umiem”), a na końcu test części: wybierasz poprawne tłumaczenie, a przy rzeczownikach także rodzajnik. Wynik od '+PART_PASS+'% odblokowuje kolejną część. Stuknij kartę, żeby ją odwrócić, przesuń w prawo, jeśli umiesz, w lewo, jeśli jeszcze nie. Fiszki, których nie umiesz, wracają w kolejnej rundzie. Po wszystkich częściach odblokowuje się sprawdzian ('+TEST_N+' pytań, zaliczenie od '+PASS+'%). Powtórka pokazuje słowa, które według cyklu 1, 3, 7, 14, 30 i 60 dni warto sobie przypomnieć. Tempo ustalasz sam.</p></details>';
   if(canSpeak)h+='<label class="switch"><input type="checkbox" id="say" data-a="toggle-say"'+(state.say?' checked':'')+'> Wymawiaj słowo po odwróceniu fiszki</label>';
   h+='<p class="sync" id="sync">'+syncText()+'</p>';
   h+='<p class="sync">Wersja: '+esc(BUILD)+(STANDALONE?' <button class="btn btn-quiet" data-a="update">Sprawdź aktualizację</button>':'')+'</p>';
@@ -520,7 +531,7 @@ function learnAdvance(){
   const s=session;s.i++;
   if(s.i<s.keys.length){render();return;}
   s.phase='flash';initFlash(s,s.all.filter(k=>s.known.indexOf(k)<0));
-  if(!s.fl.deck.length)markPassed(s.li,s.p);
+  if(!s.fl.deck.length)markFlashDone(s.li,s.p);
   render();window.scrollTo(0,0);
 }
 function renderLearn(){
@@ -553,7 +564,7 @@ function flashAnswer(ok){
   const k=f.deck[f.i];(ok?f.know:f.still).push(k);
   if(!f.seen[k]){f.seen[k]=1;schedule(s,k,ok);logAnswer();touch();}
   f.i++;f.flipped=false;f.busy=false;
-  if(f.i>=f.deck.length&&!f.still.length&&(s.kind==='learn'||s.kind==='practice'))markPassed(s.li,s.p);
+  if(f.i>=f.deck.length&&!f.still.length&&(s.kind==='learn'||s.kind==='practice')&&!s.subset)markFlashDone(s.li,s.p);
   render();
 }
 function flyAnswer(ok){
@@ -605,7 +616,9 @@ function renderFlashEnd(s){
   const gated=s.kind==='learn'||s.kind==='practice';
   if(f.still.length){
     btns.push(['fl-again-still',null,'Ucz się dalej: '+f.still.length+' '+plural(f.still.length,'fiszka','fiszki','fiszek')]);
-    if(gated&&!partPassed(s.li,s.p)){const L=LESSONS[s.li];h+='<p class="muted small" style="margin:0">'+(s.p+1<L.parts.length?'Teil '+(s.p+2):'Sprawdzian')+' odblokuje się, kiedy wszystkie fiszki z tej części będą na „Umiem”.</p>';}
+    if(gated&&!flashDone(s.li,s.p))h+='<p class="muted small" style="margin:0">Test części odblokuje się, kiedy wszystkie fiszki z tej części będą na „Umiem”.</p>';
+  }else if(gated&&!partPassed(s.li,s.p)){
+    if(flashDone(s.li,s.p))btns.push(['ptest',s.li+':'+s.p,'Test części · '+slow(LESSONS[s.li].parts[s.p].length)+', zaliczenie od '+PART_PASS+'%']);
   }else if(gated){
     const li=s.li,np=curPart(li);
     if(lessonDone(li)&&!testPassed(li))btns.push(['test',li,'Wszystkie części zaliczone · Sprawdzian ('+TEST_N+' pytań)']);
@@ -628,11 +641,11 @@ function startReview(){
   session={kind:'review'};initFlash(session,keys);
   view={name:'flash'};render();window.scrollTo(0,0);
 }
-function startPart(li,p){if(partDone(li,p))startPractice(li,p);else startLearn(li,p);}
-function startPractice(li,p){
+function startPart(li,p){if(!partDone(li,p))startLearn(li,p);else if(!flashDone(li,p))startPractice(li,p);else startPartTest(li,p);}
+function startPractice(li,p,subset){
   const P=LESSONS[li].parts[p];if(!P)return;
   if(!partOpen(li,p)){go({name:'lesson',li:li,open:null});return;}
-  session={kind:'practice',li:li,p:p};initFlash(session,P.map(w=>w.key));
+  session={kind:'practice',li:li,p:p,subset:!!(subset&&subset.length)};initFlash(session,session.subset?subset.slice():P.map(w=>w.key));
   view={name:'flash'};render();window.scrollTo(0,0);
 }
 
@@ -706,6 +719,102 @@ function qnext(){
   s.qi++;s.answer=null;s.typed='';s.typedOk=false;s.note='';
   if(s.qi>=s.q.length){s.phase='done';if(s.kind==='test')finishTest(s);}
   render();window.scrollTo(0,0);
+}
+
+/* ---------- test części: wybór odpowiedzi ---------- */
+function distractorsPart(w){
+  const L=LESSONS[w.li],g=grp(w.t);
+  let c=shuffle(L.parts[w.pi].filter(o=>o!==w&&grp(o.t)===g));
+  c=c.concat(shuffle(L.items.filter(o=>o!==w&&o.pi!==w.pi&&grp(o.t)===g)));
+  if(c.length<6)c=c.concat(shuffle(WORDS.filter(o=>o.li!==w.li&&grp(o.t)===g)).slice(0,12));
+  return c;
+}
+function ptQuestion(w){
+  const opts=[{label:w.pl,ok:true}];
+  for(const o of distractorsPart(w)){if(opts.length>=4)break;if(opts.some(x=>x.label===o.pl))continue;opts.push({label:o.pl,ok:false});}
+  return {w:w,noun:!!ART[w.t],opts:shuffle(opts)};
+}
+function startPartTest(li,p){
+  if(!partOpen(li,p)||!flashDone(li,p)){go({name:'lesson',li:li,open:null});return;}
+  const P=LESSONS[li].parts[p];
+  session={kind:'ptest',li:li,p:p,q:shuffle(P.slice()).map(ptQuestion),qi:0,selArt:null,selTr:null,answered:false,results:[],phase:'q'};
+  view={name:'ptest'};render();window.scrollTo(0,0);
+}
+function ptCheck(){
+  const s=session;if(!s||s.kind!=='ptest'||s.answered)return;
+  const q=s.q[s.qi];if(s.selTr==null||(q.noun&&s.selArt==null))return;
+  const trOk=q.opts[s.selTr].ok,artOk=!q.noun||s.selArt===ART[q.w.t],ok=trOk&&artOk;
+  s.answered=true;s.lastOk=ok;
+  s.results.push({k:q.w.key,ok:ok,artOk:artOk,trOk:trOk});
+  if(!ok&&state.c[q.w.key])setCard(q.w.key,1,today());
+  logAnswer();touch();if(state.say)sayWord(q.w);render();
+}
+function ptNext(){
+  const s=session;if(!s||s.kind!=='ptest'||!s.answered)return;
+  s.qi++;s.selArt=null;s.selTr=null;s.answered=false;
+  if(s.qi>=s.q.length){
+    const ok=s.results.filter(r=>r.ok).length;
+    s.score=Math.round(ok/s.results.length*100);s.prev=partScore(s.li,s.p);
+    if(s.prev==null||s.score>s.prev)state.pt[pkey(s.li,s.p)]=s.score;
+    touch();s.phase='done';
+  }
+  render();window.scrollTo(0,0);
+}
+function renderPartTest(){
+  const s=session,L=LESSONS[s.li];
+  if(s.phase==='done')return renderPartTestEnd();
+  const q=s.q[s.qi],w=q.w,ans=s.answered;
+  let h='<div class="topbar">'+backBtn('Start','home')+'<span class="t">Test · '+esc(L.label)+' · Teil '+(s.p+1)+' · '+(s.qi+1)+'/'+s.q.length+'</span></div>';
+  h+='<div class="progress" aria-hidden="true"><i style="width:'+(s.qi/s.q.length*100).toFixed(1)+'%"></i></div>';
+  h+='<div class="qprompt">'+(q.noun?'Wybierz rodzajnik i tłumaczenie':'Wybierz tłumaczenie')+'</div>';
+  h+='<div class="qbig" lang="de">'+(q.noun?'<span class="muted">___</span> '+esc(w.de):hw(w))+'</div>';
+  if(q.noun){
+    h+='<div class="qlab">Rodzajnik</div><div class="opts opts-art">';
+    ['der','die','das'].forEach(a=>{let c='';if(ans)c=a===ART[w.t]?' is-ok':(s.selArt===a?' is-bad':' is-dim');else if(s.selArt===a)c=' is-sel';
+      h+='<button class="opt'+c+'" data-a="pt-art" data-arg="'+a+'"'+(ans?' disabled':'')+' lang="de" aria-pressed="'+(s.selArt===a)+'">'+artHtml(a)+'</button>';});
+    h+='</div><div class="qlab">Tłumaczenie</div>';
+  }
+  h+='<div class="opts">';
+  q.opts.forEach((o,i)=>{let c='';if(ans)c=o.ok?' is-ok':(s.selTr===i?' is-bad':' is-dim');else if(s.selTr===i)c=' is-sel';
+    h+='<button class="opt'+c+'" data-a="pt-tr" data-arg="'+i+'"'+(ans?' disabled':'')+(q.noun?' aria-pressed="'+(s.selTr===i)+'"':'')+'>'+esc(o.label)+'</button>';});
+  h+='</div>';
+  if(!ans&&q.noun){const ready=s.selArt!=null&&s.selTr!=null;h+='<button class="btn btn-primary wide" data-a="pt-check"'+(ready?'':' disabled')+'>Sprawdź</button>';}
+  if(ans){
+    const r=s.results[s.results.length-1];
+    let why='';if(!r.ok&&q.noun)why=!r.artOk&&!r.trOk?'Zły rodzajnik i tłumaczenie.':!r.artOk?'Tłumaczenie dobrze, ale rodzajnik to '+ART[w.t]+'.':'Rodzajnik dobrze, ale tłumaczenie jest inne.';
+    h+='<div class="fb"><div class="v '+(r.ok?'ok':'bad')+'">'+(r.ok?'Dobrze!':'Poprawnie: <span lang="de">'+hw(w)+'</span> · '+esc(w.pl))+'</div>'+(why?'<div class="small">'+why+'</div>':'');
+    if(w.ex)h+='<div class="muted small"><span lang="de">'+esc(w.ex)+'</span><br>'+esc(w.exPl)+'</div>';
+    h+='</div><button class="btn btn-primary wide" data-a="pt-next">'+(s.qi+1<s.q.length?'Dalej':'Wynik')+'</button>';
+  }
+  h+='<p class="kbd">'+(ans?'Enter: dalej':q.noun?'Wybierz oba, potem Enter: sprawdź':'Klawisze 1–4')+'</p>';
+  return h;
+}
+function renderPartTestEnd(){
+  const s=session,L=LESSONS[s.li],pass=s.score>=PART_PASS,wrong=s.results.filter(r=>!r.ok),ok=s.results.length-wrong.length;
+  let h='<div class="topbar">'+backBtn('Start','home')+'<span class="t">Test · '+esc(L.label)+' · Teil '+(s.p+1)+'</span></div>';
+  h+='<section class="done"><div class="eyebrow">Wynik testu</div><div class="score '+(pass?'pass':'fail')+'">'+s.score+'%</div>';
+  h+='<p>'+ok+' z '+s.results.length+' dobrze. '+(pass?'Zaliczone! '+(s.p+1<L.parts.length?'Teil '+(s.p+2)+' jest odblokowany.':'Wszystkie części tej lekcji są zaliczone.'):'Do zaliczenia potrzeba '+PART_PASS+'%. Powtórz fiszki z błędnych słów i spróbuj jeszcze raz.')+(s.prev!=null?' Poprzednio najlepiej: '+s.prev+'%.':'')+'</p></section>';
+  if(wrong.length){
+    h+='<div class="panel"><div class="eyebrow">Błędy ('+wrong.length+')</div><ul class="rlist">';
+    wrong.forEach(r=>{const w=word(r.k);const tag=ART[w.t]?(!r.artOk&&!r.trOk?'rodzajnik i tłumaczenie':!r.artOk?'rodzajnik':'tłumaczenie'):'tłumaczenie';
+      h+='<li><span class="mk bad">✗</span><span><b lang="de">'+hw(w)+'</b> · '+esc(w.pl)+'<br><span class="muted small">błąd: '+tag+'</span></span></li>';});
+    h+='</ul></div>';
+  }
+  const btns=[];
+  if(pass){
+    const li=s.li,np=curPart(li);
+    if(lessonDone(li)&&!testPassed(li))btns.push(['test',li,'Wszystkie części zaliczone · Sprawdzian lekcji ('+TEST_N+' pytań)']);
+    else if(np>=0)btns.push(['part',li+':'+np,'Dalej: Teil '+(np+1)+' · '+L.label]);
+    else{const nl=nextLessonIdx();if(nl>=0)btns.push(['part',nl+':'+curPart(nl),'Dalej: '+LESSONS[nl].label+' · '+LESSONS[nl].de]);}
+  }else{
+    btns.push(['pt-wrong',null,'Fiszki z błędnych słów ('+wrong.length+')']);
+    btns.push(['ptest',s.li+':'+s.p,'Spróbuj testu jeszcze raz']);
+  }
+  h+='<div class="actions">';
+  btns.forEach((b,i)=>{h+='<button class="btn'+(i===0?' btn-primary':'')+' wide" data-a="'+b[0]+'"'+(b[1]!=null?' data-arg="'+b[1]+'"':'')+'>'+esc(b[2])+'</button>';});
+  if(pass)h+='<button class="btn wide" data-a="ptest" data-arg="'+s.li+':'+s.p+'">Zrób test jeszcze raz</button>';
+  h+='<button class="btn btn-quiet wide" data-a="home">Wróć na start</button></div>';
+  return h;
 }
 
 /* ---------- lesson quiz ---------- */
@@ -812,18 +921,22 @@ function renderLesson(){
   h+='<div class="chips"><span class="chip">'+s.n+' '+plural(s.n,'nowe','nowe','nowych')+'</span><span class="chip">'+s.l+' w nauce</span><span class="chip">'+s.m+' '+plural(s.m,'opanowane','opanowane','opanowanych')+'</span></div>';
   h+='<div class="parts">';
   L.parts.forEach((P,p)=>{
-    const passed=partPassed(li,p),open=partOpen(li,p),done=partDone(li,p),learned=P.filter(w=>state.c[w.key]).length;
+    const passed=partPassed(li,p),open=partOpen(li,p),done=partDone(li,p),fdn=flashDone(li,p),sc=partScore(li,p),learned=P.filter(w=>state.c[w.key]).length;
+    const a=li+':'+p,bF='<button class="btn" data-a="practice" data-arg="'+a+'">Fiszki</button>';
     let btns='';
-    if(passed)btns='<button class="btn" data-a="practice" data-arg="'+li+':'+p+'">Fiszki</button>';
-    else if(open)btns=done?'<button class="btn btn-primary" data-a="practice" data-arg="'+li+':'+p+'">Zalicz fiszki</button>'
-      :'<button class="btn btn-primary" data-a="learnp" data-arg="'+li+':'+p+'">Ucz się</button>'+(learned?'<button class="btn" data-a="practice" data-arg="'+li+':'+p+'">Fiszki</button>':'');
-    const st=passed?'zaliczone':open?(done?'poznane, do zaliczenia':learned?'poznane '+learned+' z '+P.length:'do nauki'):'odblokuje się po zaliczeniu Teil '+p;
+    if(passed)btns=bF+'<button class="btn" data-a="ptest" data-arg="'+a+'">Test</button>';
+    else if(open){
+      if(!done)btns='<button class="btn btn-primary" data-a="learnp" data-arg="'+a+'">Ucz się</button>'+(learned?bF:'');
+      else if(!fdn)btns='<button class="btn btn-primary" data-a="practice" data-arg="'+a+'">Zalicz fiszki</button>';
+      else btns='<button class="btn btn-primary" data-a="ptest" data-arg="'+a+'">Test</button>'+bF;
+    }
+    const st=passed?'zaliczone · test '+sc+'%':open?(!done?(learned?'poznane '+learned+' z '+P.length:'do nauki'):!fdn?'poznane, fiszki do zaliczenia':'fiszki zaliczone, czas na test'+(sc!=null?' · ostatnio '+sc+'%':'')):'odblokuje się po teście z Teil '+p;
     h+='<div class="prow'+(open?'':' is-off')+'"><div class="sb"><div class="st-t">Teil '+(p+1)+(passed?' <span class="ok-t">✓</span>':'')+'</div><div class="muted small" lang="de">'+esc(P.slice(0,3).map(plainHw).join(', '))+' …</div><div class="muted small">'+slow(P.length)+' · '+st+'</div></div><div class="pbtns">'+btns+'</div></div>';
   });
   h+='</div><div class="actions">';
   const sc=testScore(li);
   if(lessonDone(li))h+='<button class="btn btn-primary wide" data-a="test" data-arg="'+li+'">Sprawdzian z lekcji · '+TEST_N+' pytań'+(sc!=null?' · najlepszy wynik '+sc+'%':'')+'</button>';
-  else h+='<p class="muted small" style="margin:0">Sprawdzian odblokuje się po zaliczeniu fiszek ze wszystkich części.</p>';
+  else h+='<p class="muted small" style="margin:0">Sprawdzian odblokuje się po zaliczeniu testów ze wszystkich części.</p>';
   h+='<div class="row2"><button class="btn" data-a="quiz" data-arg="'+li+'">Quiz z lekcji</button><button class="btn" data-a="text" data-arg="'+li+'">Tekst do czytania</button></div></div>';
   h+='<ul class="wlist">';
   L.parts.forEach(P=>P.forEach(w=>{
@@ -882,6 +995,12 @@ const H={
   lesson:a=>go({name:'lesson',li:+a,open:null}),
   learnp:a=>{const p=pair(a);startLearn(p[0],p[1]);},
   part:a=>{const p=pair(a);startPart(p[0],p[1]);},
+  ptest:a=>{const p=pair(a);startPartTest(p[0],p[1]);},
+  'pt-art':a=>{const s=session;if(!s||s.kind!=='ptest'||s.answered)return;s.selArt=a;render();},
+  'pt-tr':a=>{const s=session;if(!s||s.kind!=='ptest'||s.answered)return;s.selTr=+a;if(!s.q[s.qi].noun)ptCheck();else render();},
+  'pt-check':()=>ptCheck(),
+  'pt-next':()=>ptNext(),
+  'pt-wrong':()=>{const s=session;if(!s||s.kind!=='ptest')return;startPractice(s.li,s.p,s.results.filter(r=>!r.ok).map(r=>r.k));},
   update:()=>{const done=()=>location.reload();try{navigator.serviceWorker.getRegistration().then(r=>r?r.update():null).then(done,done);}catch(e){done();}},
   practice:a=>{const p=pair(a);startPractice(p[0],p[1]);},
   review:()=>startReview(),
@@ -977,6 +1096,13 @@ document.addEventListener('keydown',e=>{
     return;
   }
   if(view.name==='learn'&&s.phase==='cards'&&e.key==='Enter'){e.preventDefault();learnAdvance();return;}
+  if(view.name==='ptest'&&s.phase!=='done'){
+    const q=s.q[s.qi];
+    if(s.answered&&(e.key==='Enter'||e.key===' ')){e.preventDefault();ptNext();return;}
+    if(!s.answered&&q.noun&&e.key==='Enter'){e.preventDefault();ptCheck();return;}
+    if(!s.answered&&!q.noun&&/^[1-4]$/.test(e.key)&&q.opts[+e.key-1]){e.preventDefault();s.selTr=+e.key-1;ptCheck();return;}
+    return;
+  }
   if((view.name==='quiz'||view.name==='test')&&s.phase!=='done'){
     const cq=s.q[s.qi];
     if(s.answer==null&&cq&&cq.type!=='type'&&/^[1-4]$/.test(e.key)){e.preventDefault();answer(+e.key-1);return;}
