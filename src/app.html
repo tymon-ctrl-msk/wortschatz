@@ -198,6 +198,7 @@ h1,h2,h3{margin:0;text-wrap:balance}
 .parts{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px 14px}
 .prow{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;padding-block:12px}
 .prow + .prow{border-top:1px solid var(--line)}
+.prow.is-off .st-t{color:var(--muted)}
 .prow .pbtns{display:flex;gap:6px}
 .prow .pbtns .btn{min-height:40px;padding:8px 12px}
 .ok-t{color:var(--ok)}
@@ -268,10 +269,11 @@ h1,h2,h3{margin:0;text-wrap:balance}
 
 const ART={m:'der',f:'die',n:'das',p:'die'};
 const GCLS={m:'der',f:'die',n:'das',p:'pl'};
-const TLABEL={m:'rzeczownik',f:'rzeczownik',n:'rzeczownik',p:'rzeczownik · tylko l. mn.',v:'czasownik',a:'przymiotnik',x:'słówko / zwrot'};
+const TLABEL={m:'rzeczownik',f:'rzeczownik',n:'rzeczownik',p:'rzeczownik · tylko l. mn.',v:'czasownik',a:'przymiotnik',ad:'przysłówek',pr:'zaimek',q:'słowo pytające',pp:'przyimek',k:'spójnik',z:'liczebnik',x:'zwrot'};
 const INTERVALS=[0,1,3,7,14,30,60];
 const STANDALONE=/*__STANDALONE__*/false;
 const MASTER=4, MAXBOX=6, REVIEW_MAX=50, TEST_N=25, PASS=80, PART=20;
+const BUILD='__BUILD__';
 const SPK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg>';
 const REDUCE=(function(){try{return matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){return false;}})();
 
@@ -279,9 +281,19 @@ const WORDS=[]; const BYKEY=new Map(); const BYLOW=new Map();
 LESSONS.forEach((L,li)=>{L.items=[];L.words.forEach((w,wi)=>{
   const o={t:w[0],de:w[1],forms:w[2]||'',pl:w[3],ex:w[4]||'',exPl:w[5]||'',tip:w[6]||'',li:li,wi:wi,key:w[1]};
   WORDS.push(o);L.items.push(o);BYKEY.set(w[1],o);if(!BYLOW.has(w[1].toLowerCase()))BYLOW.set(w[1].toLowerCase(),o);});
-  const n=L.items.length,k=Math.max(1,Math.round(n/PART)),base=Math.floor(n/k),extra=n%k;
+  if(!L.id)L.id='T'+(li+1);
+  L.grund=L.id.charAt(0)==='G';
+  L.num=L.grund?L.id:L.id.slice(1);
+  L.label=L.grund?'Grundwortschatz '+L.id:'Lektion '+L.num;
+  /* każda część ma mieszankę: rzeczowniki, czasowniki, przymiotniki i resztę, rozłożone równo */
+  const cls=w=>(w.t==='m'||w.t==='f'||w.t==='n'||w.t==='p')?'N':(w.t==='v'||w.t==='a')?w.t:'o';
+  const groups={};L.items.forEach(w=>{const c=cls(w);(groups[c]=groups[c]||[]).push(w);});
+  const order=[];Object.keys(groups).forEach((g,gi)=>{const arr=groups[g];arr.forEach((w,j)=>order.push({w:w,k:(j+0.5)/arr.length,g:gi}));});
+  order.sort((a,b)=>a.k-b.k||a.g-b.g);
+  const seq=order.map(o=>o.w);
+  const n=seq.length,k=Math.max(1,Math.round(n/PART)),base=Math.floor(n/k),extra=n%k;
   L.parts=[];let s=0;
-  for(let p=0;p<k;p++){const size=base+(p<extra?1:0);const arr=L.items.slice(s,s+size);arr.forEach(w=>{w.pi=p;});L.parts.push(arr);s+=size;}
+  for(let p=0;p<k;p++){const size=base+(p<extra?1:0);const arr=seq.slice(s,s+size);arr.forEach(w=>{w.pi=p;});L.parts.push(arr);s+=size;}
 });
 
 /* ---------- helpers ---------- */
@@ -311,9 +323,10 @@ function sayWord(w){say(plainHw(w).replace(/!$/,''));}
 
 /* ---------- progress state ---------- */
 const LS='wortschatz-a2-v1';
-function fresh(){return {v:1,c:{},l:{},t:{},log:{},say:true,dir:'de',savedAt:0};}
+function fresh(){return {v:1,c:{},l:{},t:{},pp:{},log:{},say:true,dir:'de',savedAt:0};}
 function valid(s){return !!(s&&typeof s==='object'&&s.c&&typeof s.c==='object');}
-function normalize(s){const f=fresh();const o=Object.assign(f,s);['log','l','t'].forEach(k=>{if(!o[k]||typeof o[k]!=='object')o[k]={};});if(o.dir!=='pl')o.dir='de';return o;}
+function normalize(s){const f=fresh();const o=Object.assign(f,s);['log','l','t','pp'].forEach(k=>{if(!o[k]||typeof o[k]!=='object')o[k]={};});if(o.dir!=='pl')o.dir='de';
+  const t2={};Object.keys(o.t).forEach(k=>{t2[/^\d+$/.test(k)?'T'+(+k+1):k]=o.t[k];});o.t=t2;return o;}
 function loadLocal(){try{const r=localStorage.getItem(LS);if(!r)return null;const s=JSON.parse(r);return valid(s)?normalize(s):null;}catch(e){return null;}}
 function saveLocal(){try{localStorage.setItem(LS,JSON.stringify(state));}catch(e){}}
 let state=loadLocal()||fresh();
@@ -361,7 +374,7 @@ async function connect(){
 let pendingImport=null;
 function b64e(str){const by=new TextEncoder().encode(str);let bin='';for(let i=0;i<by.length;i++)bin+=String.fromCharCode(by[i]);return btoa(bin);}
 function b64d(b){const bin=atob(b);const by=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)by[i]=bin.charCodeAt(i);return new TextDecoder().decode(by);}
-function exportCode(){return 'WSA2:'+b64e(JSON.stringify({v:1,c:state.c,l:state.l,t:state.t,log:state.log,say:state.say,dir:state.dir}));}
+function exportCode(){return 'WSA2:'+b64e(JSON.stringify({v:1,c:state.c,l:state.l,t:state.t,pp:state.pp,log:state.log,say:state.say,dir:state.dir}));}
 function importCode(txt){try{const m=String(txt||'').replace(/\s+/g,'').match(/^WSA2:(.+)$/);if(!m)return null;const s=JSON.parse(b64d(m[1]));return valid(s)?normalize(s):null;}catch(e){return null;}}
 
 function setCard(k,box,due){state.c[k]=[box,due];}
@@ -373,11 +386,15 @@ function logAnswer(){
 function streak(){let d=today();if(!state.log[d])d--;let n=0;while(state.log[d]){n++;d--;}return n;}
 function dueKeys(){const t=today();return WORDS.filter(w=>{const c=state.c[w.key];return c&&c[1]<=t;}).map(w=>w.key);}
 function lessonStats(L){let n=0,l=0,m=0;L.items.forEach(w=>{const s=status(w.key);if(s==='new')n++;else if(s==='master')m++;else l++;});return {n:n,l:l,m:m,total:L.items.length};}
-function nextLessonIdx(){for(let i=0;i<LESSONS.length;i++){if(LESSONS[i].items.some(w=>!state.c[w.key]))return i;}return -1;}
+function pkey(li,p){return LESSONS[li].id+':'+p;}
 function partDone(li,p){return LESSONS[li].parts[p].every(w=>state.c[w.key]);}
-function nextPart(li){return LESSONS[li].parts.findIndex(arr=>arr.some(w=>!state.c[w.key]));}
-function lessonDone(li){return LESSONS[li].items.every(w=>state.c[w.key]);}
-function testScore(li){const v=state.t[li];return typeof v==='number'?v:null;}
+function partPassed(li,p){return !!state.pp[pkey(li,p)];}
+function partOpen(li,p){return p===0||partPassed(li,p-1);}
+function markPassed(li,p){if(!partPassed(li,p)){state.pp[pkey(li,p)]=1;touch();}}
+function curPart(li){return LESSONS[li].parts.findIndex((a,p)=>!partPassed(li,p));}
+function nextLessonIdx(){for(let i=0;i<LESSONS.length;i++){if(curPart(i)>=0)return i;}return -1;}
+function lessonDone(li){return curPart(li)<0;}
+function testScore(li){const v=state.t[LESSONS[li].id];return typeof v==='number'?v:null;}
 function testPassed(li){return (testScore(li)||0)>=PASS;}
 function pendingTest(){for(let i=0;i<LESSONS.length;i++){if(lessonDone(i)&&!testPassed(i))return i;}return -1;}
 
@@ -416,12 +433,12 @@ function renderHome(){
   let h='<header class="sign"><div class="sign-in"><div class="sign-title">Wortschatz</div><div class="sign-sub">Niveau A2 · '+LESSONS.length+' Lektionen · '+WORDS.length+' Wörter</div></div></header>';
   if(STANDALONE&&!isInstalled())h+='<div class="install"><b>Zainstaluj jako aplikację</b><span>iPhone (Safari): Udostępnij → „Do ekranu początkowego”. Android (Chrome): ⋮ → „Zainstaluj aplikację”.</span></div>';
   if(nli>=0){
-    const L=LESSONS[nli],p=nextPart(nli),P=L.parts[p];
-    h+='<section class="panel" aria-label="Kontynuuj naukę"><div class="eyebrow">Kontynuuj</div>'
-      +'<div class="cont-t"><span class="lnum-s">'+(nli+1)+'</span><div><div class="cont-de" lang="de">'+esc(L.de)+'</div><div class="muted small">'+esc(L.pl)+'</div></div></div>'
-      +'<div class="partbar" aria-hidden="true">'+L.parts.map((a,i)=>'<span class="pb'+(partDone(nli,i)?' done':(i===p?' cur':''))+'"></span>').join('')+'</div>'
-      +'<div class="muted small">Teil '+(p+1)+' z '+L.parts.length+' · '+slow(P.length)+'. Najpierw poznajesz słowa, potem uczysz się ich na fiszkach.</div>'
-      +'<button class="btn btn-primary wide" data-a="learnp" data-arg="'+nli+':'+p+'">Ucz się · Teil '+(p+1)+'</button></section>';
+    const L=LESSONS[nli],p=curPart(nli),P=L.parts[p],known=partDone(nli,p);
+    h+='<section class="panel" aria-label="Kontynuuj naukę"><div class="eyebrow">Kontynuuj · '+(L.grund?'Grundwortschatz':'Lektion '+L.num)+'</div>'
+      +'<div class="cont-t"><span class="lnum-s">'+esc(L.num)+'</span><div><div class="cont-de" lang="de">'+esc(L.de)+'</div><div class="muted small">'+esc(L.pl)+'</div></div></div>'
+      +'<div class="partbar" aria-hidden="true">'+L.parts.map((a,i)=>'<span class="pb'+(partPassed(nli,i)?' done':(i===p?' cur':''))+'"></span>').join('')+'</div>'
+      +'<div class="muted small">Teil '+(p+1)+' z '+L.parts.length+' · '+slow(P.length)+'. '+(known?'Słowa już poznane. Zalicz fiszki (wszystkie na „Umiem”), żeby odblokować '+(p+1<L.parts.length?'Teil '+(p+2):'sprawdzian')+'.':'Najpierw poznajesz słowa, potem zaliczasz fiszki.')+'</div>'
+      +'<button class="btn btn-primary wide" data-a="part" data-arg="'+nli+':'+p+'">'+(known?'Zalicz fiszki':'Ucz się')+' · Teil '+(p+1)+'</button></section>';
   }else{
     h+='<section class="panel"><div class="eyebrow">Kontynuuj</div><div class="st-t">Wszystkie lekcje przerobione. Zostały powtórki i sprawdziany.</div></section>';
   }
@@ -430,16 +447,18 @@ function renderHome(){
   else h+='<div class="li is-off"><div class="sb"><div class="st-t">Powtórka</div><div class="muted small">'+(known?'Na dziś nic do powtórki':'Pojawi się po pierwszej nauce')+'</div></div></div>';
   if(pt>=0){
     const sc=testScore(pt);
-    h+='<div class="li"><div class="sb"><div class="st-t">Sprawdzian · Lektion '+(pt+1)+'</div><div class="muted small">'+esc(LESSONS[pt].de)+' · '+TEST_N+' pytań, zaliczenie od '+PASS+'%'+(sc!=null?' · ostatnio '+sc+'%':'')+'</div></div><button class="btn" data-a="test" data-arg="'+pt+'">Zrób</button></div>';
+    h+='<div class="li"><div class="sb"><div class="st-t">Sprawdzian · '+esc(LESSONS[pt].label)+'</div><div class="muted small">'+esc(LESSONS[pt].de)+' · '+TEST_N+' pytań, zaliczenie od '+PASS+'%'+(sc!=null?' · ostatnio '+sc+'%':'')+'</div></div><button class="btn" data-a="test" data-arg="'+pt+'">Zrób</button></div>';
   }else if(nli>=0){
-    h+='<div class="li is-off"><div class="sb"><div class="st-t">Sprawdzian · Lektion '+(nli+1)+'</div><div class="muted small">Odblokuje się po przerobieniu wszystkich części lekcji</div></div></div>';
+    h+='<div class="li is-off"><div class="sb"><div class="st-t">Sprawdzian · '+esc(LESSONS[nli].label)+'</div><div class="muted small">Odblokuje się po zaliczeniu fiszek ze wszystkich części</div></div></div>';
   }
   h+='<dl class="stats"><div><dt>Seria</dt><dd>'+st+' '+plural(st,'dzień','dni','dni')+'</dd></div><div><dt>Dziś</dt><dd>'+td+' odp.</dd></div><div><dt>W nauce</dt><dd>'+known+'</dd></div><div><dt>Opanowane</dt><dd>'+mastered+'</dd></div></dl></section>';
-  h+='<h2 class="h2">Lektionen</h2><ol class="lessons">';
+  let sec='';
   LESSONS.forEach((L,i)=>{
+    const ns=L.grund?'g':'t';
+    if(ns!==sec){h+=(sec?'</ol>':'')+(ns==='g'?'<h2 class="h2">Grundwortschatz</h2><p class="muted small" style="margin:-10px 0 0">Słowa podstawowe według części mowy: zaimki, pytania, czasowniki, przyimki, spójniki, przymiotniki, przysłówki, liczby.</p>':'<h2 class="h2">Lektionen</h2><p class="muted small" style="margin:-10px 0 0">Słownictwo tematyczne A2.</p>')+'<ol class="lessons">';sec=ns;}
     const s=lessonStats(L), pm=s.m/s.total*100, plw=s.l/s.total*100, sc=testScore(i);
     const badge=testPassed(i)?'<span class="lbadge ok">✓ Sprawdzian '+sc+'%</span>':(lessonDone(i)?'<span class="lbadge todo">Czeka sprawdzian'+(sc!=null?' · ostatnio '+sc+'%':'')+'</span>':'');
-    h+='<li><button class="lrow'+(i===nli?' is-current':'')+'" data-a="lesson" data-arg="'+i+'"><span class="lnum">'+(i+1)+'</span><span class="lt"><span class="lde">'+esc(L.de)+'</span><span class="lpl">'+esc(L.pl)+'</span>'+badge+'</span><span class="lcount">'+(s.l+s.m)+'/'+s.total+'</span><span class="bar"><i class="b-m" style="width:'+pm.toFixed(1)+'%"></i><i class="b-l" style="width:'+plw.toFixed(1)+'%"></i></span></button></li>';
+    h+='<li><button class="lrow'+(i===nli?' is-current':'')+'" data-a="lesson" data-arg="'+i+'"><span class="lnum">'+esc(L.num)+'</span><span class="lt"><span class="lde">'+esc(L.de)+'</span><span class="lpl">'+esc(L.pl)+'</span>'+badge+'</span><span class="lcount">'+(s.l+s.m)+'/'+s.total+'</span><span class="bar"><i class="b-m" style="width:'+pm.toFixed(1)+'%"></i><i class="b-l" style="width:'+plw.toFixed(1)+'%"></i></span></button></li>';
   });
   h+='</ol>'+renderFooter();
   return h;
@@ -448,9 +467,10 @@ function renderHome(){
 function renderFooter(){
   let h='<footer class="foot">';
   h+='<div class="legend"><span>'+artHtml('der')+' rodzaj męski</span><span>'+artHtml('die')+' żeński</span><span>'+artHtml('das')+' nijaki</span><span>'+artHtml('die','pl')+' tylko l. mn.</span></div>';
-  h+='<details class="how"><summary>Jak się tym uczyć</summary><p>Każda lekcja dzieli się na części po około '+PART+' słów. W każdej części najpierw poznajesz słowa: rodzajnik, formy i przykład. Potem uczysz się ich na fiszkach. Stuknij kartę, żeby ją odwrócić, przesuń w prawo, jeśli umiesz, w lewo, jeśli jeszcze nie. Fiszki, których nie umiesz, wracają w kolejnej rundzie. Po wszystkich częściach odblokowuje się sprawdzian ('+TEST_N+' pytań, zaliczenie od '+PASS+'%). Powtórka pokazuje słowa, które według cyklu 1, 3, 7, 14, 30 i 60 dni warto sobie przypomnieć. Tempo ustalasz sam.</p></details>';
+  h+='<details class="how"><summary>Jak się tym uczyć</summary><p>Każda lekcja dzieli się na części po około '+PART+' słów. W każdej części są różne części mowy. Najpierw poznajesz słowa: rodzajnik, formy i przykład. Potem zaliczasz fiszki: kolejna część odblokowuje się, kiedy wszystkie fiszki są na „Umiem”. Stuknij kartę, żeby ją odwrócić, przesuń w prawo, jeśli umiesz, w lewo, jeśli jeszcze nie. Fiszki, których nie umiesz, wracają w kolejnej rundzie. Po wszystkich częściach odblokowuje się sprawdzian ('+TEST_N+' pytań, zaliczenie od '+PASS+'%). Powtórka pokazuje słowa, które według cyklu 1, 3, 7, 14, 30 i 60 dni warto sobie przypomnieć. Tempo ustalasz sam.</p></details>';
   if(canSpeak)h+='<label class="switch"><input type="checkbox" id="say" data-a="toggle-say"'+(state.say?' checked':'')+'> Wymawiaj słowo po odwróceniu fiszki</label>';
   h+='<p class="sync" id="sync">'+syncText()+'</p>';
+  h+='<p class="sync">Wersja: '+esc(BUILD)+(STANDALONE?' <button class="btn btn-quiet" data-a="update">Sprawdź aktualizację</button>':'')+'</p>';
   h+='<details class="how" id="move"><summary>Przenieś postęp na inne urządzenie</summary><div class="move-body">'
     +'<p>Tu skopiuj kod, a w drugiej aplikacji wklej go poniżej i kliknij „Wczytaj postęp”.</p>'
     +'<button class="btn" data-a="export">Skopiuj kod postępu</button>'
@@ -466,7 +486,7 @@ function renderFooter(){
 }
 
 function wordCard(w){
-  let h='<article class="card g-'+(GCLS[w.t]||'x')+'"><div class="card-top"><span class="tlabel">'+TLABEL[w.t]+' · Lektion '+(w.li+1)+'</span>';
+  let h='<article class="card g-'+(GCLS[w.t]||'x')+'"><div class="card-top"><span class="tlabel">'+TLABEL[w.t]+' · '+LESSONS[w.li].label+'</span>';
   if(canSpeak)h+='<button class="icon-btn" data-a="say" data-arg="'+esc(w.key)+'" aria-label="Posłuchaj wymowy">'+SPK+'</button>';
   h+='</div><div class="hw" lang="de">'+hw(w)+'</div>';
   const f=formsText(w);if(f)h+='<div class="forms" lang="de">'+esc(f)+'</div>';
@@ -487,7 +507,8 @@ function startLearn(li,p){
   if(li==null||isNaN(li)||li<0)li=nextLessonIdx();
   if(li<0){go({name:'home'});return;}
   const L=LESSONS[li];
-  if(p==null||isNaN(p)||p<0||p>=L.parts.length){p=nextPart(li);if(p<0)p=0;}
+  if(p==null||isNaN(p)||p<0||p>=L.parts.length){p=curPart(li);if(p<0)p=0;}
+  if(!partOpen(li,p)){go({name:'lesson',li:li,open:null});return;}
   const P=L.parts[p];
   let intro=P.filter(w=>!state.c[w.key]).map(w=>w.key);
   const relearn=!intro.length;
@@ -499,6 +520,7 @@ function learnAdvance(){
   const s=session;s.i++;
   if(s.i<s.keys.length){render();return;}
   s.phase='flash';initFlash(s,s.all.filter(k=>s.known.indexOf(k)<0));
+  if(!s.fl.deck.length)markPassed(s.li,s.p);
   render();window.scrollTo(0,0);
 }
 function renderLearn(){
@@ -506,7 +528,7 @@ function renderLearn(){
   if(s.phase==='flash')return renderFlash();
   const w=word(s.keys[s.i]);
   let dots='';for(let i=0;i<s.keys.length;i++)dots+='<i class="'+(i<=s.i?'on':'')+'"></i>';
-  return '<div class="topbar">'+backBtn('Start','home')+'<span class="t">Lektion '+(s.li+1)+' · Teil '+(s.p+1)+' · '+(s.i+1)+'/'+s.keys.length+'</span></div><div class="dots" aria-hidden="true">'+dots+'</div>'
+  return '<div class="topbar">'+backBtn('Start','home')+'<span class="t">'+esc(LESSONS[s.li].label)+' · Teil '+(s.p+1)+' · '+(s.i+1)+'/'+s.keys.length+'</span></div><div class="dots" aria-hidden="true">'+dots+'</div>'
     +wordCard(w)
     +'<div class="row2"><button class="btn" data-a="known">Znam już</button><button class="btn btn-primary" data-a="next">'+(s.i+1<s.keys.length?'Dalej':'Fiszki →')+'</button></div>'
     +'<p class="kbd">Enter: dalej</p>';
@@ -530,7 +552,9 @@ function flashAnswer(ok){
   const s=session,f=s&&s.fl;if(!f||f.i>=f.deck.length)return;
   const k=f.deck[f.i];(ok?f.know:f.still).push(k);
   if(!f.seen[k]){f.seen[k]=1;schedule(s,k,ok);logAnswer();touch();}
-  f.i++;f.flipped=false;f.busy=false;render();
+  f.i++;f.flipped=false;f.busy=false;
+  if(f.i>=f.deck.length&&!f.still.length&&(s.kind==='learn'||s.kind==='practice'))markPassed(s.li,s.p);
+  render();
 }
 function flyAnswer(ok){
   const f=session&&session.fl;if(!f||f.busy||f.i>=f.deck.length)return;
@@ -546,7 +570,7 @@ function flip(){
 }
 function flashTitle(s){
   if(s.kind==='review')return 'Powtórka';
-  return 'Fiszki · Lektion '+(s.li+1)+' · Teil '+(s.p+1);
+  return 'Fiszki · '+LESSONS[s.li].label+' · Teil '+(s.p+1);
 }
 function renderFlash(){
   const s=session,f=s.fl;
@@ -578,17 +602,19 @@ function renderFlashEnd(s){
     h+='</ul></div>';
   }
   const btns=[];
-  if(f.still.length)btns.push(['fl-again-still',null,'Ucz się dalej: '+f.still.length+' '+plural(f.still.length,'fiszka','fiszki','fiszek')]);
-  if(s.kind==='learn'){
-    const li=s.li,np=nextPart(li);
-    if(lessonDone(li)&&!testPassed(li))btns.push(['test',li,'Lekcja przerobiona · Sprawdzian ('+TEST_N+' pytań)']);
-    else if(np>=0)btns.push(['learnp',li+':'+np,'Dalej: Teil '+(np+1)+' · Lektion '+(li+1)]);
-    else{const nl=nextLessonIdx();if(nl>=0)btns.push(['learnp',nl+':'+nextPart(nl),'Dalej: Lektion '+(nl+1)+' · '+LESSONS[nl].de]);}
+  const gated=s.kind==='learn'||s.kind==='practice';
+  if(f.still.length){
+    btns.push(['fl-again-still',null,'Ucz się dalej: '+f.still.length+' '+plural(f.still.length,'fiszka','fiszki','fiszek')]);
+    if(gated&&!partPassed(s.li,s.p)){const L=LESSONS[s.li];h+='<p class="muted small" style="margin:0">'+(s.p+1<L.parts.length?'Teil '+(s.p+2):'Sprawdzian')+' odblokuje się, kiedy wszystkie fiszki z tej części będą na „Umiem”.</p>';}
+  }else if(gated){
+    const li=s.li,np=curPart(li);
+    if(lessonDone(li)&&!testPassed(li))btns.push(['test',li,'Wszystkie części zaliczone · Sprawdzian ('+TEST_N+' pytań)']);
+    else if(np>=0)btns.push(['part',li+':'+np,'Dalej: Teil '+(np+1)+' · '+LESSONS[li].label]);
+    else{const nl=nextLessonIdx();if(nl>=0)btns.push(['part',nl+':'+curPart(nl),'Dalej: '+LESSONS[nl].label+' · '+LESSONS[nl].de]);}
   }else if(s.kind==='review'){
     const left=dueKeys().length;if(left)btns.push(['review',null,'Powtarzaj dalej ('+left+')']);
-  }else if(s.kind==='practice'){
-    btns.push(['lesson',s.li,'Wróć do lekcji']);
   }
+  if(s.kind==='practice')btns.push(['lesson',s.li,'Wróć do lekcji']);
   let h2='<div class="actions">';
   btns.forEach((b,i)=>{h2+='<button class="btn'+(i===0?' btn-primary':'')+' wide" data-a="'+b[0]+'"'+(b[1]!=null?' data-arg="'+b[1]+'"':'')+'>'+esc(b[2])+'</button>';});
   if(f.orig.length)h2+='<button class="btn wide" data-a="fl-again-all">Wszystkie fiszki od nowa</button>';
@@ -602,8 +628,10 @@ function startReview(){
   session={kind:'review'};initFlash(session,keys);
   view={name:'flash'};render();window.scrollTo(0,0);
 }
+function startPart(li,p){if(partDone(li,p))startPractice(li,p);else startLearn(li,p);}
 function startPractice(li,p){
   const P=LESSONS[li].parts[p];if(!P)return;
+  if(!partOpen(li,p)){go({name:'lesson',li:li,open:null});return;}
   session={kind:'practice',li:li,p:p};initFlash(session,P.map(w=>w.key));
   view={name:'flash'};render();window.scrollTo(0,0);
 }
@@ -696,9 +724,9 @@ function startQuiz(li){
 }
 function renderQuiz(){
   const s=session;
-  if(s.phase!=='done')return renderQuestionScreen('Quiz · Lektion '+(s.li+1));
+  if(s.phase!=='done')return renderQuestionScreen('Quiz · '+LESSONS[s.li].label);
   const ok=s.results.filter(r=>r.ok).length;
-  let h='<section class="done"><div class="eyebrow">Quiz · Lektion '+(s.li+1)+'</div><h1>'+ok+' / '+s.results.length+'</h1></section>';
+  let h='<section class="done"><div class="eyebrow">Quiz · '+esc(LESSONS[s.li].label)+'</div><h1>'+ok+' / '+s.results.length+'</h1></section>';
   const wrong=s.results.filter(r=>!r.ok);
   if(wrong.length){
     h+='<div class="panel"><div class="eyebrow">Do poprawki</div><ul class="rlist">';
@@ -753,14 +781,14 @@ function finishTest(s){
   const ok=s.results.filter(r=>r.ok).length;
   s.score=s.results.length?Math.round(ok/s.results.length*100):0;
   s.prev=testScore(s.li);
-  if(s.prev==null||s.score>s.prev)state.t[s.li]=s.score;
+  if(s.prev==null||s.score>s.prev)state.t[LESSONS[s.li].id]=s.score;
   touch();
 }
 function renderTest(){
   const s=session;
-  if(s.phase!=='done')return renderQuestionScreen('Sprawdzian · Lektion '+(s.li+1));
+  if(s.phase!=='done')return renderQuestionScreen('Sprawdzian · '+LESSONS[s.li].label);
   const pass=s.score>=PASS,wrong=s.results.filter(r=>!r.ok);
-  let h='<section class="done"><div class="eyebrow">Sprawdzian · Lektion '+(s.li+1)+' · '+esc(LESSONS[s.li].de)+'</div><div class="score '+(pass?'pass':'fail')+'">'+s.score+'%</div>';
+  let h='<section class="done"><div class="eyebrow">Sprawdzian · '+esc(LESSONS[s.li].label)+' · '+esc(LESSONS[s.li].de)+'</div><div class="score '+(pass?'pass':'fail')+'">'+s.score+'%</div>';
   h+='<p>'+(pass?'Zaliczone! Próg to '+PASS+'%.':'Jeszcze nie. Do zaliczenia brakuje '+(PASS-s.score)+' pkt proc. Błędne słowa wrócą dziś w powtórce.')+(s.prev!=null?' Poprzedni najlepszy wynik: '+s.prev+'%.':'')+'</p></section>';
   if(wrong.length){
     h+='<div class="panel"><div class="eyebrow">Do poprawki ('+wrong.length+')</div><ul class="rlist">';
@@ -769,7 +797,7 @@ function renderTest(){
   }
   const nli=nextLessonIdx(),due=dueKeys().length;
   h+='<div class="actions">';
-  if(pass&&nli>=0)h+='<button class="btn btn-primary wide" data-a="learnp" data-arg="'+nli+':'+nextPart(nli)+'">Dalej: Lektion '+(nli+1)+' · '+esc(LESSONS[nli].de)+'</button>';
+  if(pass&&nli>=0)h+='<button class="btn btn-primary wide" data-a="part" data-arg="'+nli+':'+curPart(nli)+'">Dalej: '+esc(LESSONS[nli].label)+' · '+esc(LESSONS[nli].de)+'</button>';
   if(!pass&&due)h+='<button class="btn btn-primary wide" data-a="review">Powtórka z błędnymi słowami ('+due+')</button>';
   h+='<button class="btn wide" data-a="test" data-arg="'+s.li+'">'+(pass?'Zrób sprawdzian jeszcze raz':'Spróbuj jeszcze raz')+'</button>';
   h+='<button class="btn btn-quiet wide" data-a="home">Wróć na start</button></div>';
@@ -780,23 +808,26 @@ function renderTest(){
 function renderLesson(){
   const li=view.li;const L=LESSONS[li];const s=lessonStats(L);
   let h='<div class="topbar">'+backBtn('Wszystkie lekcje','home')+'</div>';
-  h+='<header class="lhead"><div class="eyebrow">Lektion '+(li+1)+'</div><h1 lang="de">'+esc(L.de)+'</h1><div class="muted">'+esc(L.pl)+'</div></header>';
+  h+='<header class="lhead"><div class="eyebrow">'+esc(L.label)+'</div><h1 lang="de">'+esc(L.de)+'</h1><div class="muted">'+esc(L.pl)+'</div></header>';
   h+='<div class="chips"><span class="chip">'+s.n+' '+plural(s.n,'nowe','nowe','nowych')+'</span><span class="chip">'+s.l+' w nauce</span><span class="chip">'+s.m+' '+plural(s.m,'opanowane','opanowane','opanowanych')+'</span></div>';
   h+='<div class="parts">';
   L.parts.forEach((P,p)=>{
-    const done=partDone(li,p),learned=P.filter(w=>state.c[w.key]).length;
-    h+='<div class="prow"><div class="sb"><div class="st-t">Teil '+(p+1)+(done?' <span class="ok-t">✓</span>':'')+'</div><div class="muted small" lang="de">'+esc(P.slice(0,3).map(plainHw).join(', '))+' …</div><div class="muted small">'+slow(P.length)+(learned&&!done?' · poznane '+learned:'')+'</div></div><div class="pbtns">'
-      +(done?'':'<button class="btn btn-primary" data-a="learnp" data-arg="'+li+':'+p+'">Ucz się</button>')
-      +(learned?'<button class="btn" data-a="practice" data-arg="'+li+':'+p+'">Fiszki</button>':'')+'</div></div>';
+    const passed=partPassed(li,p),open=partOpen(li,p),done=partDone(li,p),learned=P.filter(w=>state.c[w.key]).length;
+    let btns='';
+    if(passed)btns='<button class="btn" data-a="practice" data-arg="'+li+':'+p+'">Fiszki</button>';
+    else if(open)btns=done?'<button class="btn btn-primary" data-a="practice" data-arg="'+li+':'+p+'">Zalicz fiszki</button>'
+      :'<button class="btn btn-primary" data-a="learnp" data-arg="'+li+':'+p+'">Ucz się</button>'+(learned?'<button class="btn" data-a="practice" data-arg="'+li+':'+p+'">Fiszki</button>':'');
+    const st=passed?'zaliczone':open?(done?'poznane, do zaliczenia':learned?'poznane '+learned+' z '+P.length:'do nauki'):'odblokuje się po zaliczeniu Teil '+p;
+    h+='<div class="prow'+(open?'':' is-off')+'"><div class="sb"><div class="st-t">Teil '+(p+1)+(passed?' <span class="ok-t">✓</span>':'')+'</div><div class="muted small" lang="de">'+esc(P.slice(0,3).map(plainHw).join(', '))+' …</div><div class="muted small">'+slow(P.length)+' · '+st+'</div></div><div class="pbtns">'+btns+'</div></div>';
   });
   h+='</div><div class="actions">';
   const sc=testScore(li);
   if(lessonDone(li))h+='<button class="btn btn-primary wide" data-a="test" data-arg="'+li+'">Sprawdzian z lekcji · '+TEST_N+' pytań'+(sc!=null?' · najlepszy wynik '+sc+'%':'')+'</button>';
-  else h+='<p class="muted small" style="margin:0">Sprawdzian odblokuje się po przerobieniu wszystkich części ('+(s.total-s.n)+'/'+s.total+' słów).</p>';
+  else h+='<p class="muted small" style="margin:0">Sprawdzian odblokuje się po zaliczeniu fiszek ze wszystkich części.</p>';
   h+='<div class="row2"><button class="btn" data-a="quiz" data-arg="'+li+'">Quiz z lekcji</button><button class="btn" data-a="text" data-arg="'+li+'">Tekst do czytania</button></div></div>';
   h+='<ul class="wlist">';
-  L.items.forEach(w=>{
-    if(w===L.parts[w.pi][0])h+='<li class="wsep">Teil '+(w.pi+1)+'</li>';
+  L.parts.forEach(P=>P.forEach(w=>{
+    if(w===P[0])h+='<li class="wsep">Teil '+(w.pi+1)+'</li>';
     const st=status(w.key);const open=view.open===w.key;
     h+='<li><button class="wrow" data-a="expand" data-arg="'+esc(w.key)+'" aria-expanded="'+open+'"><span class="st '+st+'" title="'+(st==='new'?'nowe':st==='master'?'opanowane':'w nauce')+'"></span><span class="w"><b lang="de">'+hw(w)+'</b><span>'+esc(w.pl)+'</span></span></button>';
     if(open){
@@ -811,7 +842,7 @@ function renderLesson(){
       h+='</div></div>';
     }
     h+='</li>';
-  });
+  }));
   h+='</ul>';
   return h;
 }
@@ -831,12 +862,12 @@ function textHtml(src){
 function textPlain(src){return src.replace(RX,(m,a)=>a);}
 function renderText(){
   const li=view.li;const L=LESSONS[li];
-  let h='<div class="topbar">'+backBtn('Lektion '+(li+1),'lesson',li)+'</div>';
-  h+='<header class="lhead"><div class="eyebrow">Lektion '+(li+1)+' · Tekst</div><h1 lang="de">'+esc(L.de)+'</h1><div class="muted small">Kliknij podkreślone słowo, żeby zobaczyć tłumaczenie.</div></header>';
+  let h='<div class="topbar">'+backBtn(L.label,'lesson',li)+'</div>';
+  h+='<header class="lhead"><div class="eyebrow">'+esc(L.label)+' · Tekst</div><h1 lang="de">'+esc(L.de)+'</h1><div class="muted small">Kliknij podkreślone słowo, żeby zobaczyć tłumaczenie.</div></header>';
   h+='<div class="reader"><p lang="de">'+textHtml(L.text.de)+'</p></div>';
   if(view.pop){
     const w=word(view.pop);
-    if(w)h+='<div class="pop"><div><div class="hwsm" lang="de">'+hw(w)+'</div><div>'+esc(w.pl)+'</div><div class="muted small">Lektion '+(w.li+1)+'</div></div>'+(canSpeak?'<button class="icon-btn" data-a="say" data-arg="'+esc(w.key)+'" aria-label="Posłuchaj wymowy">'+SPK+'</button>':'')+'</div>';
+    if(w)h+='<div class="pop"><div><div class="hwsm" lang="de">'+hw(w)+'</div><div>'+esc(w.pl)+'</div><div class="muted small">'+esc(LESSONS[w.li].label)+'</div></div>'+(canSpeak?'<button class="icon-btn" data-a="say" data-arg="'+esc(w.key)+'" aria-label="Posłuchaj wymowy">'+SPK+'</button>':'')+'</div>';
   }
   h+='<div class="row2">'+(canSpeak?'<button class="btn" data-a="saytext">Przeczytaj na głos</button>':'')+'<button class="btn" data-a="toggle-tr">'+(view.tr?'Ukryj tłumaczenie':'Pokaż tłumaczenie')+'</button></div>';
   if(view.tr)h+='<p class="tr">'+esc(L.text.pl)+'</p>';
@@ -850,6 +881,8 @@ const H={
   home:()=>go({name:'home'}),
   lesson:a=>go({name:'lesson',li:+a,open:null}),
   learnp:a=>{const p=pair(a);startLearn(p[0],p[1]);},
+  part:a=>{const p=pair(a);startPart(p[0],p[1]);},
+  update:()=>{const done=()=>location.reload();try{navigator.serviceWorker.getRegistration().then(r=>r?r.update():null).then(done,done);}catch(e){done();}},
   practice:a=>{const p=pair(a);startPractice(p[0],p[1]);},
   review:()=>startReview(),
   quiz:a=>startQuiz(+a),

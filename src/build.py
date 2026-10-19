@@ -5,9 +5,11 @@ import sys, re, base64, json, os, shutil
 here=os.path.dirname(os.path.abspath(__file__))
 src_dir, out = here, os.path.dirname(here)
 app=open(src_dir+'/app.html',encoding='utf8').read()
-data='\n'.join(open(src_dir+'/'+f,encoding='utf8').read() for f in ['data1.js','data2.js','data3.js','data4.js'])
+data='\n'.join(open(src_dir+'/'+f,encoding='utf8').read() for f in ['data1.js','data2.js','data3.js','data4.js','data5.js'])
 assert '/*__DATA__*/' in app and '/*__STANDALONE__*/false' in app
-body=app.replace('/*__DATA__*/',data).replace('/*__STANDALONE__*/false','true')
+import datetime
+BUILD=datetime.datetime.now(__import__('zoneinfo').ZoneInfo('Europe/Warsaw')).strftime('%d.%m.%Y, %H:%M')
+body=app.replace('/*__DATA__*/',data).replace('/*__STANDALONE__*/false','true').replace('__BUILD__',BUILD)
 # strip head-ish lines that belong in <head> or reference Google Fonts
 lines=[l for l in body.split('\n') if not re.match(r'\s*<(title|meta name="claude:|link rel="(preconnect|stylesheet)")',l)]
 body='\n'.join(lines)
@@ -23,7 +25,7 @@ for fam,pkg,slug,weights in [('Barlow','barlow','barlow',[400,500,600,700]),('Ba
 head=('<!doctype html><html lang="pl"><head><meta charset="utf-8">'
  '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
  '<title>Wortschatz A2</title>'
- '<meta name="description" content="Fiszki do niemieckiego A2: 22 lekcje, 1281 słów, powtórki i sprawdziany.">'
+ '<meta name="description" content="Fiszki do niemieckiego A2: 28 lekcji, 1461 słów, fiszki, powtórki i sprawdziany.">'
  '<meta name="theme-color" content="#EDF0F2" media="(prefers-color-scheme: light)">'
  '<meta name="theme-color" content="#0F1418" media="(prefers-color-scheme: dark)">'
  '<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">'
@@ -41,7 +43,7 @@ self.addEventListener('fetch',e=>{
   const req=e.request;if(req.method!=='GET')return;
   const url=new URL(req.url);if(url.origin!==self.location.origin)return;
   if(req.mode==='navigate'){
-    e.respondWith(fetch(req).then(r=>{const cp=r.clone();caches.open(CACHE).then(c=>c.put('./index.html',cp));return r;}).catch(()=>caches.match('./index.html')));
+    e.respondWith(fetch(new Request(req.url,{cache:'no-cache',credentials:'same-origin'})).then(r=>{if(r.ok){const cp=r.clone();caches.open(CACHE).then(c=>c.put('./index.html',cp));}return r;}).catch(()=>caches.match('./index.html')));
     return;
   }
   e.respondWith(caches.match(req).then(r=>r||fetch(req).then(res=>{if(res.ok){const cp=res.clone();caches.open(CACHE).then(c=>c.put(req,cp));}return res;})));
